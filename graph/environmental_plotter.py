@@ -11,7 +11,7 @@ from datetime import datetime as dt
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QGridLayout, QLabel, QLineEdit, 
                              QPushButton, QComboBox, QProgressBar, QMessageBox,
-                             QFileDialog, QGroupBox, QStatusBar)
+                             QFileDialog, QGroupBox, QStatusBar, QHBoxLayout, QButtonGroup)
 import pandas as pd
 from datetime import datetime, timedelta
 import os
@@ -199,7 +199,7 @@ class EnvironmentalDataPlotter(QMainWindow):
             # Smoothing controls
             date_layout.addWidget(QLabel("Smoothing:"), 2, 0)
             self.smoothing_combo = QComboBox()
-            self.smoothing_combo.addItems(["None","Low (10 points)","Medium (50 points)","High (100 points)","Very High (250 points)","Extreme (500 points)"])
+            self.smoothing_combo.addItems(["None","Low (10 points)","Medium (50 points)","High (100 points)","Very High (250 points)","Extreme (500 points)","Ultra (1000 points)","Max (2000 points)"])
             date_layout.addWidget(self.smoothing_combo, 2, 1)
             
             date_layout.addWidget(QLabel("Method:"), 2, 2)
@@ -219,6 +219,52 @@ class EnvironmentalDataPlotter(QMainWindow):
         try:
             plot_group = QGroupBox("Environmental Data Plot")
             plot_layout = QVBoxLayout(plot_group)
+            
+            # Add view control buttons
+            self.logger.debug("Creating view control buttons")
+            button_layout = QHBoxLayout()
+            
+            self.view_button_group = QButtonGroup()
+            self.view_button_group.setExclusive(True)
+            
+            # Create buttons for different views
+            self.btn_show_all = QPushButton("Show All")
+            self.btn_show_all.setCheckable(True)
+            self.btn_show_all.setChecked(True)
+            self.btn_show_all.clicked.connect(lambda: self.change_view('all'))
+            
+            self.btn_show_temp = QPushButton("Temperature")
+            self.btn_show_temp.setCheckable(True)
+            self.btn_show_temp.clicked.connect(lambda: self.change_view('temp'))
+            
+            self.btn_show_humidity = QPushButton("Humidity")
+            self.btn_show_humidity.setCheckable(True)
+            self.btn_show_humidity.clicked.connect(lambda: self.change_view('humidity'))
+            
+            self.btn_show_pressure = QPushButton("Pressure")
+            self.btn_show_pressure.setCheckable(True)
+            self.btn_show_pressure.clicked.connect(lambda: self.change_view('pressure'))
+            
+            self.btn_show_feels = QPushButton("Feels Like")
+            self.btn_show_feels.setCheckable(True)
+            self.btn_show_feels.clicked.connect(lambda: self.change_view('feels_like'))
+            
+            # Add buttons to button group
+            self.view_button_group.addButton(self.btn_show_all)
+            self.view_button_group.addButton(self.btn_show_temp)
+            self.view_button_group.addButton(self.btn_show_humidity)
+            self.view_button_group.addButton(self.btn_show_pressure)
+            self.view_button_group.addButton(self.btn_show_feels)
+            
+            # Add buttons to layout
+            button_layout.addWidget(self.btn_show_all)
+            button_layout.addWidget(self.btn_show_temp)
+            button_layout.addWidget(self.btn_show_humidity)
+            button_layout.addWidget(self.btn_show_pressure)
+            button_layout.addWidget(self.btn_show_feels)
+            button_layout.addStretch()
+            
+            plot_layout.addLayout(button_layout)
             
             # Create matplotlib canvas
             self.logger.debug("Initializing matplotlib canvas")
@@ -504,7 +550,9 @@ class EnvironmentalDataPlotter(QMainWindow):
                 "Medium (50 points)": 50,
                 "High (100 points)": 100,
                 "Very High (250 points)": 250,
-                "Extreme (500 points)": 500
+                "Extreme (500 points)": 500,
+                "Ultra (1000 points)": 1000,
+                "Max (2000 points)": 2000
             }
             smoothing_window = smoothing_map.get(smoothing_text, 1)
             
@@ -625,6 +673,18 @@ class EnvironmentalDataPlotter(QMainWindow):
             self.status_bar.showMessage(f"Data exported to {os.path.basename(filename)}")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Error exporting data: {str(e)}")
+    
+    def change_view(self, view_mode: str):
+        """Change the plot view mode"""
+        self.logger.info(f"Changing view mode to: {view_mode}")
+        try:
+            self.canvas.set_view_mode(view_mode)
+            # Regenerate the plot if data is available
+            if self.start_date_combo.currentText() and self.end_date_combo.currentText():
+                self.generate_plot()
+        except Exception as e:
+            self.logger.error(f"Error changing view: {e}")
+            self.logger.debug(f"Full traceback: {traceback.format_exc()}")
 
 
 def main():

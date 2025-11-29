@@ -24,10 +24,12 @@ class MatplotlibCanvas(FigureCanvas):
         self.setParent(parent)
         
         self.logger.debug("Creating 2x2 subplot layout")
-        self.axes = self.figure.subplots(2, 2)
-        self.figure.tight_layout(pad=3.0)
+        self.axes = None  # Will be created based on view mode
+        self.view_mode = 'all'  # Default view mode
+        self._create_subplots()
         
         self.current_df = None
+        self.current_outdoor_df = None
         self.hover_annotation = None
         
         # Connect hover event
@@ -36,23 +38,50 @@ class MatplotlibCanvas(FigureCanvas):
         self.clear_plots()
         self.logger.info("Matplotlib canvas initialized successfully")
     
+    def _create_subplots(self):
+        """Create subplots based on view mode"""
+        self.figure.clear()
+        if self.view_mode == 'all':
+            self.axes = self.figure.subplots(2, 2)
+            self.figure.tight_layout(pad=1.5)
+        else:
+            # Single plot mode - maximize space
+            self.axes = self.figure.add_subplot(111)
+            self.figure.tight_layout(pad=0.5)
+    
+    def set_view_mode(self, mode: str):
+        """Set the view mode and recreate subplots"""
+        self.logger.info(f"Setting view mode to: {mode}")
+        self.view_mode = mode
+        self._create_subplots()
+    
     def clear_plots(self):
         """Clear all plots"""
         self.logger.debug("Clearing all plots")
         self.current_df = None
+        self.current_outdoor_df = None
         try:
-            for i, ax in enumerate(self.axes.flat):
-                ax.clear()
-                self.logger.debug(f"Cleared subplot {i}")
+            if self.axes is None:
+                self._create_subplots()
             
-            self.axes[0, 0].set_title("No Data Available")
-            self.axes[0, 0].text(0.5, 0.5, "Connect to FTP and select date range\nto view environmental data", 
-                                ha='center', va='center', transform=self.axes[0, 0].transAxes, fontsize=12)
-            
-            for i, ax in enumerate(self.axes.flat):
-                if i > 0:
-                    ax.set_visible(False)
-                    self.logger.debug(f"Hid subplot {i}")
+            if self.view_mode == 'all':
+                for i, ax in enumerate(self.axes.flat):
+                    ax.clear()
+                    self.logger.debug(f"Cleared subplot {i}")
+                
+                self.axes[0, 0].set_title("No Data Available")
+                self.axes[0, 0].text(0.5, 0.5, "Connect to FTP and select date range\nto view environmental data", 
+                                    ha='center', va='center', transform=self.axes[0, 0].transAxes, fontsize=12)
+                
+                for i, ax in enumerate(self.axes.flat):
+                    if i > 0:
+                        ax.set_visible(False)
+                        self.logger.debug(f"Hid subplot {i}")
+            else:
+                self.axes.clear()
+                self.axes.set_title("No Data Available")
+                self.axes.text(0.5, 0.5, "Connect to FTP and select date range\nto view environmental data", 
+                              ha='center', va='center', transform=self.axes.transAxes, fontsize=12)
             
             self.draw()
             self.logger.info("Plots cleared and canvas updated")
@@ -97,33 +126,80 @@ class MatplotlibCanvas(FigureCanvas):
             display_x = closest_point['datetime']
             display_y = 0
 
-            if ax == self.axes[0, 0]:
-                display_y = closest_point['temperature']
-                annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nIndoor Temp: {display_y:.1f}°C"
-            elif ax == self.axes[0, 1]:
-                display_y = closest_point['humidity']
-                if pd.isna(display_y):
-                    annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nHumidity: N/A"
-                else:
-                    annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nHumidity: {display_y:.1f}%RH"
-            elif ax == self.axes[1, 0]:
-                display_y = closest_point['pressure']
-                annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nIndoor Pressure: {display_y:.1f}hPa"
-            elif ax == self.axes[1, 1]:
-                if 'feels_like' in closest_point:
-                    display_y = closest_point['feels_like']
-                    actual_temp = closest_point['temperature']
-                    annotation_text = (f"Time: {display_x:%d/%m/%Y %H:%M}\n"
-                                       f"Feels Like: {display_y:.1f}°C\nActual: {actual_temp:.1f}°C")
-                else:
+            # Determine what data to show based on view mode and axes
+            if self.view_mode == 'all':
+                if ax == self.axes[0, 0]:
                     display_y = closest_point['temperature']
-                    annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nTemp: {display_y:.1f}°C"
+                    annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nIndoor Temp: {display_y:.1f}°C"
+                elif ax == self.axes[0, 1]:
+                    display_y = closest_point['humidity']
+                    if pd.isna(display_y):
+                        annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nHumidity: N/A"
+                    else:
+                        annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nHumidity: {display_y:.1f}%RH"
+                elif ax == self.axes[1, 0]:
+                    display_y = closest_point['pressure']
+                    annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nIndoor Pressure: {display_y:.1f}hPa"
+                elif ax == self.axes[1, 1]:
+                    if 'feels_like' in closest_point:
+                        display_y = closest_point['feels_like']
+                        actual_temp = closest_point['temperature']
+                        annotation_text = (f"Time: {display_x:%d/%m/%Y %H:%M}\n"
+                                           f"Feels Like: {display_y:.1f}°C\nActual: {actual_temp:.1f}°C")
+                    else:
+                        display_y = closest_point['temperature']
+                        annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nTemp: {display_y:.1f}°C"
+            else:
+                # Single view mode
+                if self.view_mode == 'temp':
+                    display_y = closest_point['temperature']
+                    annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nIndoor Temp: {display_y:.1f}°C"
+                elif self.view_mode == 'humidity':
+                    display_y = closest_point['humidity']
+                    if pd.isna(display_y):
+                        annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nHumidity: N/A"
+                    else:
+                        annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nHumidity: {display_y:.1f}%RH"
+                elif self.view_mode == 'pressure':
+                    display_y = closest_point['pressure']
+                    annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nIndoor Pressure: {display_y:.1f}hPa"
+                elif self.view_mode == 'feels_like':
+                    if 'feels_like' in closest_point:
+                        display_y = closest_point['feels_like']
+                        actual_temp = closest_point['temperature']
+                        annotation_text = (f"Time: {display_x:%d/%m/%Y %H:%M}\n"
+                                           f"Feels Like: {display_y:.1f}°C\nActual: {actual_temp:.1f}°C")
+                    else:
+                        display_y = closest_point['temperature']
+                        annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nTemp: {display_y:.1f}°C"
 
             if annotation_text:
+                # Smart tooltip positioning to avoid boundary issues
+                # Get axes bounds in data coordinates
+                xlim = ax.get_xlim()
+                ylim = ax.get_ylim()
+                
+                # Convert display_x to numeric for comparison
+                from matplotlib.dates import date2num
+                x_numeric = date2num(display_x)
+                
+                # Calculate relative position (0-1)
+                x_rel = (x_numeric - xlim[0]) / (xlim[1] - xlim[0])
+                y_rel = (display_y - ylim[0]) / (ylim[1] - ylim[0])
+                
+                # Adjust tooltip position based on cursor location
+                if x_rel > 0.7:  # Right side - shift tooltip left
+                    xytext = (-120, 40)
+                else:
+                    xytext = (20, 40)
+                
+                if y_rel > 0.7:  # Top side - shift tooltip down
+                    xytext = (xytext[0], -40)
+                
                 self.hover_annotation = ax.annotate(
                     annotation_text,
                     xy=(display_x, display_y),
-                    xytext=(-80, 40),
+                    xytext=xytext,
                     textcoords='offset points',
                     bbox={'boxstyle': 'round,pad=0.5', 'fc': 'lightyellow', 'alpha': 0.9, 'edgecolor': 'gray'},
                     arrowprops={'arrowstyle': '->', 'connectionstyle': 'arc3,rad=0', 'color': 'gray'},
@@ -188,54 +264,134 @@ class MatplotlibCanvas(FigureCanvas):
         
         # Store DataFrame for hover functionality
         self.current_df = indoor_df.copy()
+        self.current_outdoor_df = outdoor_df
         
         try:
-            # Clear previous plots
-            self.logger.debug("Clearing previous plots")
-            for ax in self.axes.flat:
-                ax.clear()
-                ax.set_visible(True)
+            # Calculate feels like temperature
+            feels_like_temp = []
+            for _, row in indoor_df.iterrows():
+                feels_like = self.calculate_heat_index(row['temperature'], row['humidity'])
+                feels_like_temp.append(feels_like)
+            self.current_df['feels_like'] = feels_like_temp
             
-            # Plot 1: Temperature (Indoor and Outdoor)
-            self.logger.debug("Creating temperature plot")
-            self.axes[0, 0].plot(indoor_df['datetime'], indoor_df['temperature'], 'r-', linewidth=1.5, label='Indoor Temperature')
+            if self.view_mode == 'all':
+                self._plot_all_views(indoor_df, outdoor_df, feels_like_temp)
+            else:
+                self._plot_single_view(indoor_df, outdoor_df, feels_like_temp)
+            
+            self.figure.tight_layout(pad=0.5 if self.view_mode != 'all' else 1.5)
+            self.draw()
+            self.logger.info("Time series plots created and displayed successfully")
+        except Exception as e:
+            self.logger.error(f"Error creating time series plots: {e}")
+            self.logger.debug(f"Full traceback: {traceback.format_exc()}")
+            raise
+    
+    def _plot_all_views(self, indoor_df: pd.DataFrame, outdoor_df: pd.DataFrame, feels_like_temp: list):
+        """Plot all 4 graphs in 2x2 grid"""
+        self.logger.debug("Clearing previous plots")
+        for ax in self.axes.flat:
+            ax.clear()
+            ax.set_visible(True)
+        
+        # Plot 1: Temperature (Indoor and Outdoor)
+        self.logger.debug("Creating temperature plot")
+        self.axes[0, 0].plot(indoor_df['datetime'], indoor_df['temperature'], 'r-', linewidth=1.5, label='Indoor Temperature')
+        if outdoor_df is not None and not outdoor_df.empty:
+            self.axes[0, 0].plot(outdoor_df['datetime'], outdoor_df['temperature'], 'orange', linewidth=1.5, label='Outdoor Temperature')
+        
+        self.axes[0, 0].set_title('Temperature Over Time', fontsize=10)
+        self.axes[0, 0].set_ylabel('Temperature (°C)', fontsize=9)
+        self.axes[0, 0].grid(True, alpha=0.3)
+        self.axes[0, 0].tick_params(axis='x', rotation=45, labelsize=8)
+        self.axes[0, 0].tick_params(axis='y', labelsize=8)
+        self.axes[0, 0].legend(fontsize=8)
+        
+        # Plot 2: Humidity (Indoor only)
+        self.logger.debug("Creating humidity plot")
+        self.axes[0, 1].plot(indoor_df['datetime'], indoor_df['humidity'], 'b-', linewidth=1.5, label='Indoor Humidity')
+        self.axes[0, 1].set_title('Humidity Over Time (Indoor Only)', fontsize=10)
+        self.axes[0, 1].set_ylabel('Humidity (%RH)', fontsize=9)
+        self.axes[0, 1].grid(True, alpha=0.3)
+        self.axes[0, 1].tick_params(axis='x', rotation=45, labelsize=8)
+        self.axes[0, 1].tick_params(axis='y', labelsize=8)
+        self.axes[0, 1].legend(fontsize=8)
+        
+        # Plot 3: Pressure (Indoor and Outdoor)
+        self.logger.debug("Creating pressure plot")
+        self.axes[1, 0].plot(indoor_df['datetime'], indoor_df['pressure'], 'g-', linewidth=1.5, label='Indoor Pressure')
+        if outdoor_df is not None and not outdoor_df.empty:
+            # Subtract 1 from outdoor pressure values for calibration
+            self.axes[1, 0].plot(outdoor_df['datetime'], outdoor_df['pressure'] - 1, 'purple', linewidth=1.5, label='Outdoor Pressure')
+        
+        self.axes[1, 0].set_title('Atmospheric Pressure Over Time', fontsize=10)
+        self.axes[1, 0].set_ylabel('Pressure (hPa)', fontsize=9)
+        self.axes[1, 0].grid(True, alpha=0.3)
+        self.axes[1, 0].tick_params(axis='x', rotation=45, labelsize=8)
+        self.axes[1, 0].tick_params(axis='y', labelsize=8)
+        self.axes[1, 0].legend(fontsize=8)
+        
+        # Fix Y-axis formatting to prevent scientific notation
+        pressure_formatter = ScalarFormatter(useOffset=False)
+        pressure_formatter.set_scientific(False)
+        self.axes[1, 0].yaxis.set_major_formatter(pressure_formatter)
+        
+        # Set Y-axis limits to show proper pressure range
+        all_pressure_values = indoor_df['pressure'].dropna().tolist()
+        if outdoor_df is not None and not outdoor_df.empty:
+            all_pressure_values.extend(outdoor_df['pressure'].dropna().tolist())
+        if all_pressure_values:
+            min_pressure = min(all_pressure_values)
+            max_pressure = max(all_pressure_values)
+            pressure_range = max_pressure - min_pressure
+            padding = max(pressure_range * 0.05, 1)  # 5% padding or minimum 1 hPa
+            self.axes[1, 0].set_ylim(min_pressure - padding, max_pressure + padding)
+        
+        # Plot 4: Feels Like Temperature (Heat Index)
+        self.logger.debug("Creating feels like temperature plot")
+        indoor_df_copy = indoor_df.copy()
+        indoor_df_copy['feels_like'] = feels_like_temp
+        
+        self.axes[1, 1].plot(indoor_df_copy['datetime'], indoor_df_copy['feels_like'], 'darkred', linewidth=1.5, marker='o', markersize=1, label='Feels Like')
+        self.axes[1, 1].plot(indoor_df_copy['datetime'], indoor_df_copy['temperature'], 'lightcoral', linewidth=1, alpha=0.7, label='Actual Temp')
+        self.axes[1, 1].set_title('Feels Like Temperature Over Time', fontsize=10)
+        self.axes[1, 1].set_ylabel('Temperature (°C)', fontsize=9)
+        self.axes[1, 1].set_xlabel('Date/Time', fontsize=9)
+        self.axes[1, 1].grid(True, alpha=0.3)
+        self.axes[1, 1].tick_params(axis='x', rotation=45, labelsize=8)
+        self.axes[1, 1].tick_params(axis='y', labelsize=8)
+        self.axes[1, 1].legend(fontsize=8)
+    
+    def _plot_single_view(self, indoor_df: pd.DataFrame, outdoor_df: pd.DataFrame, feels_like_temp: list):
+        """Plot a single graph in full view"""
+        self.logger.debug(f"Creating single view plot for: {self.view_mode}")
+        self.axes.clear()
+        
+        if self.view_mode == 'temp':
+            self.axes.plot(indoor_df['datetime'], indoor_df['temperature'], 'r-', linewidth=2, label='Indoor Temperature')
             if outdoor_df is not None and not outdoor_df.empty:
-                self.axes[0, 0].plot(outdoor_df['datetime'], outdoor_df['temperature'], 'orange', linewidth=1.5, label='Outdoor Temperature')
+                self.axes.plot(outdoor_df['datetime'], outdoor_df['temperature'], 'orange', linewidth=2, label='Outdoor Temperature')
+            self.axes.set_title('Temperature Over Time', fontsize=14, fontweight='bold')
+            self.axes.set_ylabel('Temperature (°C)', fontsize=12)
             
-            self.axes[0, 0].set_title('Temperature Over Time')
-            self.axes[0, 0].set_ylabel('Temperature (°C)')
-            self.axes[0, 0].grid(True, alpha=0.3)
-            self.axes[0, 0].tick_params(axis='x', rotation=45)
-            self.axes[0, 0].legend()
+        elif self.view_mode == 'humidity':
+            self.axes.plot(indoor_df['datetime'], indoor_df['humidity'], 'b-', linewidth=2, label='Indoor Humidity')
+            self.axes.set_title('Humidity Over Time (Indoor Only)', fontsize=14, fontweight='bold')
+            self.axes.set_ylabel('Humidity (%RH)', fontsize=12)
             
-            # Plot 2: Humidity (Indoor only)
-            self.logger.debug("Creating humidity plot")
-            self.axes[0, 1].plot(indoor_df['datetime'], indoor_df['humidity'], 'b-', linewidth=1.5, label='Indoor Humidity')
-            self.axes[0, 1].set_title('Humidity Over Time (Indoor Only)')
-            self.axes[0, 1].set_ylabel('Humidity (%RH)')
-            self.axes[0, 1].grid(True, alpha=0.3)
-            self.axes[0, 1].tick_params(axis='x', rotation=45)
-            self.axes[0, 1].legend()
-            
-            # Plot 3: Pressure (Indoor and Outdoor)
-            self.logger.debug("Creating pressure plot")
-            self.axes[1, 0].plot(indoor_df['datetime'], indoor_df['pressure'], 'g-', linewidth=1.5, label='Indoor Pressure')
+        elif self.view_mode == 'pressure':
+            self.axes.plot(indoor_df['datetime'], indoor_df['pressure'], 'g-', linewidth=2, label='Indoor Pressure')
             if outdoor_df is not None and not outdoor_df.empty:
-                # Subtract 1 from outdoor pressure values for calibration
-                self.axes[1, 0].plot(outdoor_df['datetime'], outdoor_df['pressure'] - 1, 'purple', linewidth=1.5, label='Outdoor Pressure')
+                self.axes.plot(outdoor_df['datetime'], outdoor_df['pressure'] - 1, 'purple', linewidth=2, label='Outdoor Pressure')
+            self.axes.set_title('Atmospheric Pressure Over Time', fontsize=14, fontweight='bold')
+            self.axes.set_ylabel('Pressure (hPa)', fontsize=12)
             
-            self.axes[1, 0].set_title('Atmospheric Pressure Over Time')
-            self.axes[1, 0].set_ylabel('Pressure (hPa)')
-            self.axes[1, 0].grid(True, alpha=0.3)
-            self.axes[1, 0].tick_params(axis='x', rotation=45)
-            self.axes[1, 0].legend()
-            
-            # Fix Y-axis formatting to prevent scientific notation
+            # Fix Y-axis formatting
             pressure_formatter = ScalarFormatter(useOffset=False)
             pressure_formatter.set_scientific(False)
-            self.axes[1, 0].yaxis.set_major_formatter(pressure_formatter)
+            self.axes.yaxis.set_major_formatter(pressure_formatter)
             
-            # Set Y-axis limits to show proper pressure range
+            # Set Y-axis limits
             all_pressure_values = indoor_df['pressure'].dropna().tolist()
             if outdoor_df is not None and not outdoor_df.empty:
                 all_pressure_values.extend(outdoor_df['pressure'].dropna().tolist())
@@ -243,40 +399,19 @@ class MatplotlibCanvas(FigureCanvas):
                 min_pressure = min(all_pressure_values)
                 max_pressure = max(all_pressure_values)
                 pressure_range = max_pressure - min_pressure
-                padding = max(pressure_range * 0.05, 1)  # 5% padding or minimum 1 hPa
-                self.axes[1, 0].set_ylim(min_pressure - padding, max_pressure + padding)
-            
-            # Plot 4: Feels Like Temperature (Heat Index)
-            self.logger.debug("Creating feels like temperature plot")
-            feels_like_temp = []
-            for _, row in indoor_df.iterrows():
-                feels_like = self.calculate_heat_index(row['temperature'], row['humidity'])
-                feels_like_temp.append(feels_like)
-            
+                padding = max(pressure_range * 0.05, 1)
+                self.axes.set_ylim(min_pressure - padding, max_pressure + padding)
+                
+        elif self.view_mode == 'feels_like':
             indoor_df_copy = indoor_df.copy()
             indoor_df_copy['feels_like'] = feels_like_temp
-            
-            self.axes[1, 1].plot(indoor_df_copy['datetime'], indoor_df_copy['feels_like'], 'darkred', linewidth=1.5, marker='o', markersize=1, label='Feels Like')
-            self.axes[1, 1].plot(indoor_df_copy['datetime'], indoor_df_copy['temperature'], 'lightcoral', linewidth=1, alpha=0.7, label='Actual Temp')
-            self.axes[1, 1].set_title('Feels Like Temperature Over Time')
-            self.axes[1, 1].set_ylabel('Temperature (°C)')
-            self.axes[1, 1].set_xlabel('Date/Time')
-            self.axes[1, 1].grid(True, alpha=0.3)
-            self.axes[1, 1].tick_params(axis='x', rotation=45)
-            self.axes[1, 1].legend()
-            
-            # Update stored data for hover functionality to include feels like temp
-            self.current_df['feels_like'] = feels_like_temp
-            
-            # Format x-axis
-            self.logger.debug("Formatting x-axis for all plots")
-            for ax in self.axes.flat:
-                ax.tick_params(axis='x', labelsize=8)
-            
-            self.figure.tight_layout()
-            self.draw()
-            self.logger.info("Time series plots created and displayed successfully")
-        except Exception as e:
-            self.logger.error(f"Error creating time series plots: {e}")
-            self.logger.debug(f"Full traceback: {traceback.format_exc()}")
-            raise
+            self.axes.plot(indoor_df_copy['datetime'], indoor_df_copy['feels_like'], 'darkred', linewidth=2, marker='o', markersize=2, label='Feels Like')
+            self.axes.plot(indoor_df_copy['datetime'], indoor_df_copy['temperature'], 'lightcoral', linewidth=1.5, alpha=0.7, label='Actual Temp')
+            self.axes.set_title('Feels Like Temperature Over Time', fontsize=14, fontweight='bold')
+            self.axes.set_ylabel('Temperature (°C)', fontsize=12)
+        
+        self.axes.set_xlabel('Date/Time', fontsize=12)
+        self.axes.grid(True, alpha=0.3)
+        self.axes.tick_params(axis='x', rotation=45, labelsize=10)
+        self.axes.tick_params(axis='y', labelsize=10)
+        self.axes.legend(fontsize=10)
