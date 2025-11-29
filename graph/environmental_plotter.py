@@ -366,7 +366,7 @@ class FTPDownloadThread(QThread):
 
 
 class MatplotlibCanvas(FigureCanvas):
-    """Custom matplotlib canvas for PyQt5"""
+    """Custom matplotlib canvas for PyQt5 with smoothing + hover support"""
     
     def __init__(self, parent=None):
         self.logger = logging.getLogger('MatplotlibCanvas')
@@ -377,28 +377,22 @@ class MatplotlibCanvas(FigureCanvas):
         self.setParent(parent)
         
         self.logger.debug("Creating 2x2 subplot layout")
-        # Create subplots
         self.axes = self.figure.subplots(2, 2)
         self.figure.tight_layout(pad=3.0)
         
-        # Initialize hover annotation variables
         self.current_df = None
         self.hover_annotation = None
         
-        # Connect mouse motion event
+        # Connect hover event
         self.mpl_connect('motion_notify_event', self.on_hover)
         
-        # Initial empty plot
         self.clear_plots()
         self.logger.info("Matplotlib canvas initialized successfully")
     
     def clear_plots(self):
         """Clear all plots"""
         self.logger.debug("Clearing all plots")
-        
-        # Clear stored data for hover functionality
         self.current_df = None
-        
         try:
             for i, ax in enumerate(self.axes.flat):
                 ax.clear()
@@ -415,141 +409,137 @@ class MatplotlibCanvas(FigureCanvas):
             
             self.draw()
             self.logger.info("Plots cleared and canvas updated")
-            
         except Exception as e:
             self.logger.error(f"Error clearing plots: {e}")
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
-    
+
     def on_hover(self, event):
         """Handle mouse hover events to show data point values"""
         if event.inaxes is None or self.current_df is None or len(self.current_df) == 0:
-            # Clear any existing annotations
             if hasattr(self, 'hover_annotation') and self.hover_annotation:
                 self.hover_annotation.set_visible(False)
                 self.draw_idle()
             return
-        
-        # Clear previous annotation
+
         if hasattr(self, 'hover_annotation') and self.hover_annotation:
             self.hover_annotation.set_visible(False)
-        
-        # Check which subplot we're in and find the closest data point
+
         ax = event.inaxes
         x_pos = event.xdata
         y_pos = event.ydata
-        
+
         if x_pos is None or y_pos is None:
             self.draw_idle()
             return
-        
-        # Find the closest data point
+
         try:
-            # Convert matplotlib date number to datetime for comparison
             from matplotlib.dates import num2date
             hover_time = num2date(x_pos)
-            
-            # Make sure both datetime objects are timezone-naive for comparison
             if hover_time.tzinfo is not None:
                 hover_time = hover_time.replace(tzinfo=None)
-            
-            # Find closest time point in data
+
             time_diffs = abs(self.current_df['datetime'] - hover_time)
             closest_idx = time_diffs.idxmin()
             closest_point = self.current_df.iloc[closest_idx]
-            
-            # Check if we're close enough to the point (within reasonable distance)
-            time_tolerance = pd.Timedelta(hours=2)  # 2 hours tolerance
+
+            time_tolerance = pd.Timedelta(hours=2)
             if time_diffs.iloc[closest_idx] > time_tolerance:
                 return
-            
-            # Determine which plot we're hovering over and get appropriate values
+
             annotation_text = ""
             display_x = closest_point['datetime']
             display_y = 0
-            
-            if ax == self.axes[0, 0]:  # Temperature plot
+
+            if ax == self.axes[0, 0]:
                 display_y = closest_point['temperature']
-                annotation_text = f"Time: {display_x.strftime('%d/%m/%Y %H:%M')}\nIndoor Temp: {display_y:.1f}°C"
-            elif ax == self.axes[0, 1]:  # Humidity plot
+                annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nIndoor Temp: {display_y:.1f}°C"
+            elif ax == self.axes[0, 1]:
                 display_y = closest_point['humidity']
-                # Only show humidity if it's a valid value (not NaN/NA for outdoor data)
                 if pd.isna(display_y):
-                    annotation_text = f"Time: {display_x.strftime('%d/%m/%Y %H:%M')}\nHumidity: N/A"
+                    annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nHumidity: N/A"
                 else:
-                    annotation_text = f"Time: {display_x.strftime('%d/%m/%Y %H:%M')}\nHumidity: {display_y:.1f}%RH"
-            elif ax == self.axes[1, 0]:  # Pressure plot
+                    annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nHumidity: {display_y:.1f}%RH"
+            elif ax == self.axes[1, 0]:
                 display_y = closest_point['pressure']
-                annotation_text = f"Time: {display_x.strftime('%d/%m/%Y %H:%M')}\nIndoor Pressure: {display_y:.1f}hPa"
-            elif ax == self.axes[1, 1]:  # Feels like temperature plot
+                annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nIndoor Pressure: {display_y:.1f}hPa"
+            elif ax == self.axes[1, 1]:
                 if 'feels_like' in closest_point:
                     display_y = closest_point['feels_like']
                     actual_temp = closest_point['temperature']
-                    annotation_text = f"Time: {display_x.strftime('%d/%m/%Y %H:%M')}\nFeels Like: {display_y:.1f}°C\nActual: {actual_temp:.1f}°C"
+                    annotation_text = (f"Time: {display_x:%d/%m/%Y %H:%M}\n"
+                                       f"Feels Like: {display_y:.1f}°C\nActual: {actual_temp:.1f}°C")
                 else:
                     display_y = closest_point['temperature']
-                    annotation_text = f"Time: {display_x.strftime('%d/%m/%Y %H:%M')}\nTemp: {display_y:.1f}°C"
-            
+                    annotation_text = f"Time: {display_x:%d/%m/%Y %H:%M}\nTemp: {display_y:.1f}°C"
+
             if annotation_text:
-                # Simple positioning that avoids clipping by using top-left offset
-                # This ensures the annotation is always visible within the plot area
                 self.hover_annotation = ax.annotate(
                     annotation_text,
                     xy=(display_x, display_y),
-                    xytext=(-80, 40),  # Position to upper-left of the point
+                    xytext=(-80, 40),
                     textcoords='offset points',
                     bbox={'boxstyle': 'round,pad=0.5', 'fc': 'lightyellow', 'alpha': 0.9, 'edgecolor': 'gray'},
                     arrowprops={'arrowstyle': '->', 'connectionstyle': 'arc3,rad=0', 'color': 'gray'},
                     fontsize=9,
                     zorder=1000
                 )
-                
             self.draw_idle()
-            
+
         except Exception as e:
             self.logger.debug(f"Error in hover handler: {e}")
-    
+
     def calculate_heat_index(self, temp_c: float, humidity: float) -> float:
         """Calculate heat index (feels like temperature) from temperature and humidity"""
         try:
-            # If humidity is missing (NaN/NA), return actual temperature
             if pd.isna(humidity):
                 return temp_c
-            
-            # Convert Celsius to Fahrenheit
             temp_f = (temp_c * 9/5) + 32
-            
-            # Heat index is only meaningful for temps > 80°F (26.7°C)
             if temp_f < 80.0:
-                return temp_c  # Return actual temperature in Celsius
-            
-            T = temp_f
-            R = humidity
-            
-            # Basic Heat Index calculation (Rothfusz equation)
+                return temp_c
+            T, R = temp_f, humidity
             HI = (-42.379 + 2.04901523*T + 10.14333127*R - 0.22475541*T*R
                   - 6.83783e-3*T*T - 5.481717e-2*R*R + 1.22874e-3*T*T*R
                   + 8.5282e-4*T*R*R - 1.99e-6*T*T*R*R)
-            
-            # Adjustments for extreme conditions
-            if R < 13 and T >= 80 and T <= 112:
-                HI = HI - ((13-R)/4) * (((17-abs(T-95))/17)**0.5)
-            elif R > 85 and T >= 80 and T <= 87:
-                HI = HI + ((R-85)/10) * ((87-T)/5)
-            
-            # Convert back to Celsius
+            if R < 13 and 80 <= T <= 112:
+                HI -= ((13-R)/4) * (((17-abs(T-95))/17)**0.5)
+            elif R > 85 and 80 <= T <= 87:
+                HI += ((R-85)/10) * ((87-T)/5)
             return (HI - 32) * 5/9
-            
         except Exception as e:
             self.logger.warning(f"Error calculating heat index: {e}")
-            return temp_c  # Return original temperature on error
-    
-    def create_time_series_plots(self, indoor_df: pd.DataFrame, outdoor_df: pd.DataFrame = None):
-        """Create time series plots"""
+            return temp_c
+
+    # ---------------- Smoothing Helpers ----------------
+    def apply_smoothing(self, df: pd.DataFrame, window: int, method: str = "median") -> pd.DataFrame:
+        """Apply smoothing to numeric columns using median or mean"""
+        if window <= 1:
+            return df
+        
+        df_smoothed = df.copy()
+        for col in ["temperature", "humidity", "pressure"]:
+            if col in df_smoothed.columns:
+                if method.lower() == "median":
+                    df_smoothed[col] = df_smoothed[col].rolling(window, min_periods=1, center=True).median()
+                else:  # mean
+                    df_smoothed[col] = df_smoothed[col].rolling(window, min_periods=1, center=True).mean()
+        return df_smoothed
+    # ---------------------------------------------------
+
+    def create_time_series_plots(self, indoor_df: pd.DataFrame, outdoor_df: pd.DataFrame = None, 
+                                smoothing_window: int = 1, smoothing_method: str = "median"):
+        """Create time series plots with user-controlled smoothing"""
         self.logger.info(f"Creating time series plots for {len(indoor_df)} indoor data points")
         if outdoor_df is not None and not outdoor_df.empty:
             self.logger.info(f"Also plotting {len(outdoor_df)} outdoor data points")
         
-        # Store DataFrame for hover functionality (using indoor data as primary)
+        # Apply smoothing based on user selection
+        if smoothing_window > 1:
+            self.logger.info(f"Applying {smoothing_method} smoothing with window={smoothing_window}")
+            indoor_df = self.apply_smoothing(indoor_df, smoothing_window, smoothing_method)
+            if outdoor_df is not None and not outdoor_df.empty:
+                outdoor_df = self.apply_smoothing(outdoor_df, smoothing_window, smoothing_method)
+        
+        # Store DataFrame for hover functionality
         self.current_df = indoor_df.copy()
         
         try:
@@ -571,13 +561,7 @@ class MatplotlibCanvas(FigureCanvas):
             self.axes[0, 0].tick_params(axis='x', rotation=45)
             self.axes[0, 0].legend()
             
-            temp_range_indoor = f"Indoor: {indoor_df['temperature'].min():.1f}°C to {indoor_df['temperature'].max():.1f}°C"
-            self.logger.debug(f"Temperature range - {temp_range_indoor}")
-            if outdoor_df is not None and not outdoor_df.empty:
-                temp_range_outdoor = f"Outdoor: {outdoor_df['temperature'].min():.1f}°C to {outdoor_df['temperature'].max():.1f}°C"
-                self.logger.debug(f"Temperature range - {temp_range_outdoor}")
-            
-            # Plot 2: Humidity (Indoor only - outdoor sensor doesn't have humidity data)
+            # Plot 2: Humidity (Indoor only)
             self.logger.debug("Creating humidity plot")
             self.axes[0, 1].plot(indoor_df['datetime'], indoor_df['humidity'], 'b-', linewidth=1.5, label='Indoor Humidity')
             self.axes[0, 1].set_title('Humidity Over Time (Indoor Only)')
@@ -585,9 +569,6 @@ class MatplotlibCanvas(FigureCanvas):
             self.axes[0, 1].grid(True, alpha=0.3)
             self.axes[0, 1].tick_params(axis='x', rotation=45)
             self.axes[0, 1].legend()
-            humidity_range = f"{indoor_df['humidity'].min():.1f}% to {indoor_df['humidity'].max():.1f}%"
-            self.logger.debug(f"Humidity range: {humidity_range}")
-            # Note: Outdoor humidity is not plotted as outdoor sensors report "N/A" for humidity
             
             # Plot 3: Pressure (Indoor and Outdoor)
             self.logger.debug("Creating pressure plot")
@@ -608,26 +589,18 @@ class MatplotlibCanvas(FigureCanvas):
             self.axes[1, 0].yaxis.set_major_formatter(pressure_formatter)
             
             # Set Y-axis limits to show proper pressure range
-            all_pressure_values = indoor_df['pressure'].tolist()
+            all_pressure_values = indoor_df['pressure'].dropna().tolist()
             if outdoor_df is not None and not outdoor_df.empty:
-                all_pressure_values.extend(outdoor_df['pressure'].tolist())
-            
-            min_pressure = min(all_pressure_values)
-            max_pressure = max(all_pressure_values)
-            pressure_range = max_pressure - min_pressure
-            padding = max(pressure_range * 0.05, 1)  # 5% padding or minimum 1 hPa
-            
-            self.axes[1, 0].set_ylim(min_pressure - padding, max_pressure + padding)
-            
-            pressure_range_indoor = f"Indoor: {indoor_df['pressure'].min():.1f}hPa to {indoor_df['pressure'].max():.1f}hPa"
-            self.logger.debug(f"Pressure range - {pressure_range_indoor}")
-            if outdoor_df is not None and not outdoor_df.empty:
-                pressure_range_outdoor = f"Outdoor: {outdoor_df['pressure'].min():.1f}hPa to {outdoor_df['pressure'].max():.1f}hPa"
-                self.logger.debug(f"Pressure range - {pressure_range_outdoor}")
+                all_pressure_values.extend(outdoor_df['pressure'].dropna().tolist())
+            if all_pressure_values:
+                min_pressure = min(all_pressure_values)
+                max_pressure = max(all_pressure_values)
+                pressure_range = max_pressure - min_pressure
+                padding = max(pressure_range * 0.05, 1)  # 5% padding or minimum 1 hPa
+                self.axes[1, 0].set_ylim(min_pressure - padding, max_pressure + padding)
             
             # Plot 4: Feels Like Temperature (Heat Index)
             self.logger.debug("Creating feels like temperature plot")
-            # Calculate feels like temperature for indoor data
             feels_like_temp = []
             for _, row in indoor_df.iterrows():
                 feels_like = self.calculate_heat_index(row['temperature'], row['humidity'])
@@ -645,9 +618,6 @@ class MatplotlibCanvas(FigureCanvas):
             self.axes[1, 1].tick_params(axis='x', rotation=45)
             self.axes[1, 1].legend()
             
-            feels_like_range = f"{min(feels_like_temp):.1f}°C to {max(feels_like_temp):.1f}°C"
-            self.logger.debug(f"Feels like temperature range: {feels_like_range}")
-            
             # Update stored data for hover functionality to include feels like temp
             self.current_df['feels_like'] = feels_like_temp
             
@@ -658,9 +628,7 @@ class MatplotlibCanvas(FigureCanvas):
             
             self.figure.tight_layout()
             self.draw()
-            
             self.logger.info("Time series plots created and displayed successfully")
-            
         except Exception as e:
             self.logger.error(f"Error creating time series plots: {e}")
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
@@ -719,7 +687,6 @@ class EnvironmentalDataPlotter(QMainWindow):
             self.status_bar.showMessage("Ready")
             
             self.logger.info("UI setup completed successfully")
-            
         except Exception as e:
             self.logger.error(f"Error setting up UI: {e}")
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
@@ -768,7 +735,6 @@ class EnvironmentalDataPlotter(QMainWindow):
             
             parent_layout.addWidget(ftp_group)
             self.logger.debug("FTP connection group created successfully")
-            
         except Exception as e:
             self.logger.error(f"Error setting up FTP group: {e}")
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
@@ -815,6 +781,17 @@ class EnvironmentalDataPlotter(QMainWindow):
             parent_layout.addWidget(date_group)
             self.logger.debug("Date selection group created successfully")
             
+            # Smoothing controls
+            date_layout.addWidget(QLabel("Smoothing:"), 2, 0)
+            self.smoothing_combo = QComboBox()
+            self.smoothing_combo.addItems(["None","Low (10 points)","Medium (50 points)","High (100 points)","Very High (250 points)","Extreme (500 points)"])
+            date_layout.addWidget(self.smoothing_combo, 2, 1)
+            
+            date_layout.addWidget(QLabel("Method:"), 2, 2)
+            self.smoothing_method_combo = QComboBox()
+            self.smoothing_method_combo.addItems(["Median", "Mean"])
+            date_layout.addWidget(self.smoothing_method_combo, 2, 3)
+
         except Exception as e:
             self.logger.error(f"Error setting up date group: {e}")
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
@@ -835,7 +812,6 @@ class EnvironmentalDataPlotter(QMainWindow):
             
             parent_layout.addWidget(plot_group)
             self.logger.debug("Plot area created successfully")
-            
         except Exception as e:
             self.logger.error(f"Error setting up plot area: {e}")
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
@@ -873,7 +849,6 @@ class EnvironmentalDataPlotter(QMainWindow):
             # Start download
             self.download_thread.start()
             self.logger.info("FTP download thread started successfully")
-            
         except Exception as e:
             self.logger.error(f"Error starting FTP download: {e}")
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
@@ -900,7 +875,6 @@ class EnvironmentalDataPlotter(QMainWindow):
             
             self.logger.info("Download process completed and UI updated")
             QMessageBox.information(self, "Success", f"Downloaded {total_files} data files ({indoor_count} indoor, {outdoor_count} outdoor)")
-            
         except Exception as e:
             self.logger.error(f"Error handling download completion: {e}")
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
@@ -914,7 +888,6 @@ class EnvironmentalDataPlotter(QMainWindow):
             self.connect_btn.setEnabled(True)
             self.status_bar.showMessage("Download failed")
             QMessageBox.critical(self, "Download Error", error_message)
-            
         except Exception as e:
             self.logger.error(f"Error handling download error: {e}")
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
@@ -950,7 +923,6 @@ class EnvironmentalDataPlotter(QMainWindow):
             self.export_btn.setEnabled(True)
             
             self.logger.info("Date selection updated successfully")
-            
         except Exception as e:
             self.logger.error(f"Error updating date selection: {e}")
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
@@ -1002,16 +974,10 @@ class EnvironmentalDataPlotter(QMainWindow):
                             'sample_size': sample_size,
                             'temperature': temperature,
                             'pressure': pressure,
-                            'humidity': humidity if humidity is not None else pd.NA  # Use pandas NA for missing data
+                            'humidity': humidity if humidity is not None else pd.NA
                         })
-                        
-                        if humidity is not None:
-                            self.logger.debug(f"Parsed line {i+1}: T={temperature}°C, P={pressure}hPa, H={humidity}%RH")
-                        else:
-                            self.logger.debug(f"Parsed line {i+1} (outdoor): T={temperature}°C, P={pressure}hPa, H=N/A")
                     else:
                         self.logger.warning(f"Line {i+1} has insufficient data ({len(parts)} parts): {line}")
-                        
                 except (ValueError, IndexError) as e:
                     self.logger.warning(f"Error parsing line {i+1}: {line} - {e}")
                     continue
@@ -1022,12 +988,9 @@ class EnvironmentalDataPlotter(QMainWindow):
             
             df = pd.DataFrame(parsed_data)
             df['datetime'] = pd.to_datetime(df['datetime'], format='%d/%m/%Y %H:%M')
-            
             self.logger.info(f"Successfully parsed {len(df)} records from CSV")
             self.logger.debug(f"Data range: {df['datetime'].min()} to {df['datetime'].max()}")
-            
             return df
-            
         except Exception as e:
             self.logger.error(f"Error parsing CSV content: {e}")
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
@@ -1082,7 +1045,6 @@ class EnvironmentalDataPlotter(QMainWindow):
                 df = self.parse_csv_content(content)
                 if not df.empty:
                     indoor_data.append(df)
-                    self.logger.debug(f"Added {len(df)} indoor records from {date_str}")
                 else:
                     self.logger.warning(f"No valid indoor data found for {date_str}")
             
@@ -1091,16 +1053,9 @@ class EnvironmentalDataPlotter(QMainWindow):
                 if date_str in self.outdoor_data_cache:
                     self.logger.debug(f"Processing outdoor data for {date_str}")
                     content = self.outdoor_data_cache[date_str]
-                    self.logger.debug(f"Outdoor content preview for {date_str}: {content[:100]}")
                     df = self.parse_csv_content(content)
                     if not df.empty:
                         outdoor_data.append(df)
-                        self.logger.debug(f"Added {len(df)} outdoor records from {date_str}")
-                        self.logger.debug(f"Outdoor data sample: T={df['temperature'].iloc[0]:.1f}°C, P={df['pressure'].iloc[0]:.1f}hPa")
-                    else:
-                        self.logger.warning(f"No valid outdoor data found for {date_str}")
-                else:
-                    self.logger.debug(f"No outdoor data available for {date_str}")
             
             self.logger.info(f"Total outdoor data files processed: {len(outdoor_data)}")
             
@@ -1120,18 +1075,29 @@ class EnvironmentalDataPlotter(QMainWindow):
                 combined_outdoor_df = pd.concat(outdoor_data, ignore_index=True)
                 combined_outdoor_df = combined_outdoor_df.sort_values('datetime')
                 self.logger.info(f"Combined outdoor data: {len(combined_outdoor_df)} total records")
-                self.logger.debug(f"Outdoor data time range: {combined_outdoor_df['datetime'].min()} to {combined_outdoor_df['datetime'].max()}")
-                self.logger.debug(f"Outdoor temp range: {combined_outdoor_df['temperature'].min():.1f}°C to {combined_outdoor_df['temperature'].max():.1f}°C")
-                self.logger.debug(f"Outdoor pressure range: {combined_outdoor_df['pressure'].min():.1f}hPa to {combined_outdoor_df['pressure'].max():.1f}hPa")
-            else:
-                self.logger.info("No outdoor data available for plotting")
             
             self.logger.info(f"Combined indoor data: {len(combined_indoor_df)} total records")
-            self.logger.debug(f"Indoor data time range: {combined_indoor_df['datetime'].min()} to {combined_indoor_df['datetime'].max()}")
             
-            # Create plots
-            self.logger.debug("Creating time series plots")
-            self.canvas.create_time_series_plots(combined_indoor_df, combined_outdoor_df)
+            # Get smoothing parameters from UI
+            smoothing_text = self.smoothing_combo.currentText()
+            smoothing_method = self.smoothing_method_combo.currentText().lower()
+            
+            # Parse window size from selection
+            smoothing_map = {
+                "None": 1,
+                "Low (10 points)": 10,
+                "Medium (50 points)": 50,
+                "High (100 points)": 100,
+                "Very High (250 points)": 250,
+                "Extreme (500 points)": 500
+            }
+            smoothing_window = smoothing_map.get(smoothing_text, 1)
+            
+            # Create plots with smoothing
+            self.logger.debug(f"Creating time series plots with {smoothing_method} smoothing (window={smoothing_window})")
+            self.canvas.create_time_series_plots(combined_indoor_df, combined_outdoor_df, 
+                                     smoothing_window, smoothing_method)
+
             
             plot_info = f"Plot generated successfully - {len(combined_indoor_df)} indoor data points"
             if combined_outdoor_df is not None:
@@ -1139,7 +1105,6 @@ class EnvironmentalDataPlotter(QMainWindow):
             
             self.status_bar.showMessage(plot_info)
             self.logger.info("Plot generation completed successfully")
-            
         except Exception as e:
             error_msg = f"Error generating plot: {str(e)}"
             self.logger.error(error_msg)
@@ -1208,7 +1173,7 @@ class EnvironmentalDataPlotter(QMainWindow):
             
             # Add feels like temperature to indoor data
             feels_like_temp = []
-            canvas = MatplotlibCanvas()  # Create temporary instance for calculation
+            canvas = MatplotlibCanvas()  # Temporary instance for calculation
             for _, row in combined_indoor_df.iterrows():
                 feels_like = canvas.calculate_heat_index(row['temperature'], row['humidity'])
                 feels_like_temp.append(feels_like)
@@ -1228,11 +1193,9 @@ class EnvironmentalDataPlotter(QMainWindow):
                 combined_outdoor_df = combined_outdoor_df.sort_values('datetime')
                 combined_outdoor_df['Date/Time'] = combined_outdoor_df['datetime'].dt.strftime('%d/%m/%Y %H:%M')
                 
-                # Merge outdoor temperature and pressure data
                 outdoor_export = combined_outdoor_df[['Date/Time', 'temperature', 'pressure']]
                 outdoor_export.columns = ['Date/Time', 'Outdoor Temperature (°C)', 'Outdoor Pressure (hPa)']
                 
-                # Merge with indoor data on Date/Time
                 export_df = pd.merge(export_df, outdoor_export, on='Date/Time', how='left')
             
             export_df.to_csv(filename, index=False)
@@ -1245,7 +1208,6 @@ class EnvironmentalDataPlotter(QMainWindow):
             
             QMessageBox.information(self, "Export Success", export_info)
             self.status_bar.showMessage(f"Data exported to {os.path.basename(filename)}")
-            
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Error exporting data: {str(e)}")
 
@@ -1261,18 +1223,14 @@ def main():
         app.setOrganizationName("ESP32 Environmental Monitor")
         
         logger.debug("Setting application style")
-        # Set application style
         app.setStyle('Fusion')
         
-        # Create and show main window
         logger.debug("Creating main window")
         window = EnvironmentalDataPlotter()
         window.show()
         
         logger.info("Application started successfully, entering event loop")
-        # Run application
         sys.exit(app.exec_())
-        
     except Exception as e:
         logger.error(f"Fatal error starting application: {e}")
         logger.debug(f"Full traceback: {traceback.format_exc()}")
