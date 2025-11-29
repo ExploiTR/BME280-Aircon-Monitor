@@ -213,6 +213,41 @@ USB_Storage/
 See the repository tree for a full breakdown. Main components:
 - `src/` (firmware), `graph/` (visualization app), `platformio.ini` (build config), documentation, and test/lib/include folders.
 
+## LED Diagnostic Patterns
+
+The firmware now includes **8 visual LED diagnostic patterns** that provide real-time feedback on system status. This makes debugging and monitoring possible without a serial connection.
+
+### Pattern Reference Table
+
+| Pattern | Duration | Meaning | What to Do |
+|---------|----------|---------|------------|
+| **3 Quick Blinks** | 150ms ON, 150ms OFF |  **System Startup** - Device woke up successfully | Normal operation |
+| **Fast Continuous Blinking** | 100ms ON/OFF (10 times) | **WiFi Connecting** - Attempting to connect to AP | Wait for connection |
+| **Solid ON (2 seconds)** | 2000ms ON |  **WiFi Connected** - Successfully connected to AP | Normal operation |
+| **5 Fast + 1 Long Blink** | 5×100ms fast, 1×800ms long | **WiFi Auth Failure** - Wrong password or corrupted flash settings | Check WiFi credentials in code |
+| **2 Long Blinks** | 800ms ON, 300ms OFF (2 times) | **WiFi No AP Found** - SSID not available or timeout | Check if router is on and SSID is correct |
+| **3 Long Blinks** | 800ms ON, 300ms OFF (3 times) | **Sensor Failure** - Cannot initialize BME280/BMP280 | Check sensor wiring and I2C connections |
+| **4 Short Blinks** | 200ms ON, 200ms OFF (4 times) | **FTP Failure** - Could not upload data to server | Check FTP server settings and connectivity |
+| **1 Long Fade** | 1000ms ON | **Sleep Entry** - About to enter deep sleep | Normal operation |
+
+### Common LED Issues
+
+#### "5 Fast + 1 Long Blink" (WiFi Auth Failure)
+**Cause**: WiFi settings appear to be "erased" or wrong password.
+- This was likely caused by flash wear from WiFi persistence.
+- The code now has `WiFi.persistent(false)` to prevent this.
+- **Solution**: Re-flash the firmware with correct credentials.
+
+#### Device Never Wakes from Sleep (No LED Activity)
+**Cause**: Missing D0-RST connection on ESP8266.
+- **Solution**: Connect GPIO16 (D0) to RST pin with a wire.
+
+#### "3 Long Blinks" (Sensor Failure)
+**Cause**: Sensor not detected on I2C bus.
+- Check wiring (3.3V, not 5V!)
+- Verify SDA/SCL pins match your configuration
+- Serial monitor will show I2C scan results
+
 
 ## Key Features
 
